@@ -108,12 +108,13 @@ def test_routes(warehouse):
             domain=warehouse,
         ),
         pretend.call(
-            "includes.edit-profile-button",
-            "/_includes/edit-profile-button/{username}",
+            "includes.profile-actions",
+            "/_includes/profile-actions/{username}",
             factory="warehouse.accounts.models:UserFactory",
             traverse="/{username}",
             domain=warehouse,
         ),
+        pretend.call("classifiers", "/classifiers/", domain=warehouse),
         pretend.call("search", "/search/", domain=warehouse),
         pretend.call(
             "accounts.profile",
@@ -242,6 +243,7 @@ def test_routes(warehouse):
             "packaging.file",
             "https://files.example.com/packages/{path}",
         ),
+        pretend.call("ses.hook", "/_/ses-hook/", domain=warehouse),
         pretend.call("rss.updates", "/rss/updates.xml", domain=warehouse),
         pretend.call("rss.packages", "/rss/packages.xml", domain=warehouse),
         pretend.call("legacy.api.simple.index", "/simple/", domain=warehouse),
@@ -320,6 +322,26 @@ def test_routes(warehouse):
             "list_classifiers",
             domain=warehouse,
         ),
+        pretend.call(
+            'legacy.api.pypi.search',
+            'search',
+            domain=warehouse,
+        ),
+        pretend.call(
+            'legacy.api.pypi.browse',
+            'browse',
+            domain=warehouse,
+        ),
+        pretend.call(
+            'legacy.api.pypi.files',
+            'files',
+            domain=warehouse,
+        ),
+        pretend.call(
+            'legacy.api.pypi.display',
+            'display',
+            domain=warehouse,
+        ),
     ]
 
     assert config.add_pypi_action_redirect.calls == [
@@ -331,6 +353,18 @@ def test_routes(warehouse):
         pretend.call(
             "pypi",
             pattern="/pypi",
+            header="Content-Type:text/xml",
+            domain=warehouse,
+        ),
+        pretend.call(
+            "pypi_slash",
+            pattern="/pypi/",
+            header="Content-Type:text/xml",
+            domain=warehouse,
+        ),
+        pretend.call(
+            "RPC2",
+            pattern="/RPC2",
             header="Content-Type:text/xml",
             domain=warehouse,
         ),

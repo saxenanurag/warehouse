@@ -30,7 +30,9 @@ from warehouse.manage.forms import (
     AddEmailForm, ChangePasswordForm, CreateRoleForm, ChangeRoleForm,
     SaveAccountForm,
 )
-from warehouse.packaging.models import File, JournalEntry, Project, Role
+from warehouse.packaging.models import (
+    File, JournalEntry, Project, Release, Role,
+)
 from warehouse.utils.project import (
     confirm_project,
     destroy_docs,
@@ -102,7 +104,7 @@ class ManageAccountViews:
         if form.validate():
             self.user_service.update_user(self.request.user.id, **form.data)
             self.request.session.flash(
-                'Account details updated.', queue='success'
+                'Account details updated', queue='success'
             )
 
         return {
@@ -122,11 +124,15 @@ class ManageAccountViews:
                 self.request.user.id, form.email.data,
             )
 
-            send_email_verification_email(self.request, email)
+            send_email_verification_email(
+                self.request,
+                self.request.user,
+                email,
+            )
 
             self.request.session.flash(
                 f'Email {email.email} added - check your email for ' +
-                'a verification link.',
+                'a verification link',
                 queue='success',
             )
             return self.default_response
@@ -148,18 +154,18 @@ class ManageAccountViews:
             ).one()
         except NoResultFound:
             self.request.session.flash(
-                'Email address not found.', queue='error'
+                'Email address not found', queue='error'
             )
             return self.default_response
 
         if email.primary:
             self.request.session.flash(
-                'Cannot remove primary email address.', queue='error'
+                'Cannot remove primary email address', queue='error'
             )
         else:
             self.request.user.emails.remove(email)
             self.request.session.flash(
-                f'Email address {email.email} removed.', queue='success'
+                f'Email address {email.email} removed', queue='success'
             )
         return self.default_response
 
@@ -177,7 +183,7 @@ class ManageAccountViews:
             ).one()
         except NoResultFound:
             self.request.session.flash(
-                'Email address not found.', queue='error'
+                'Email address not found', queue='error'
             )
             return self.default_response
 
@@ -189,7 +195,7 @@ class ManageAccountViews:
         new_primary_email.primary = True
 
         self.request.session.flash(
-            f'Email address {new_primary_email.email} set as primary.',
+            f'Email address {new_primary_email.email} set as primary',
             queue='success',
         )
 
@@ -210,19 +216,23 @@ class ManageAccountViews:
             ).one()
         except NoResultFound:
             self.request.session.flash(
-                'Email address not found.', queue='error'
+                'Email address not found', queue='error'
             )
             return self.default_response
 
         if email.verified:
             self.request.session.flash(
-                'Email is already verified.', queue='error'
+                'Email is already verified', queue='error'
             )
         else:
-            send_email_verification_email(self.request, email)
+            send_email_verification_email(
+                self.request,
+                self.request.user,
+                email,
+            )
 
             self.request.session.flash(
-                f'Verification email for {email.email} resent.',
+                f'Verification email for {email.email} resent',
                 queue='success',
             )
 
@@ -248,7 +258,7 @@ class ManageAccountViews:
             )
             send_password_change_email(self.request, self.request.user)
             self.request.session.flash(
-                'Password updated.', queue='success'
+                'Password updated', queue='success'
             )
 
         return {
@@ -265,7 +275,7 @@ class ManageAccountViews:
 
         if not username:
             self.request.session.flash(
-                "Must confirm the request.", queue='error'
+                "Must confirm the request", queue='error'
             )
             return self.default_response
 
@@ -279,7 +289,7 @@ class ManageAccountViews:
 
         if self.active_projects:
             self.request.session.flash(
-                "Cannot delete account with active project ownerships.",
+                "Cannot delete account with active project ownerships",
                 queue='error',
             )
             return self.default_response
@@ -340,6 +350,7 @@ def manage_projects(request):
 
 @view_config(
     route_name="manage.project.settings",
+    context=Project,
     renderer="manage/settings.html",
     uses_session=True,
     permission="manage",
@@ -351,6 +362,7 @@ def manage_project_settings(project, request):
 
 @view_config(
     route_name="manage.project.delete_project",
+    context=Project,
     uses_session=True,
     require_methods=["POST"],
     permission="manage",
@@ -364,6 +376,7 @@ def delete_project(project, request):
 
 @view_config(
     route_name="manage.project.destroy_docs",
+    context=Project,
     uses_session=True,
     require_methods=["POST"],
     permission="manage",
@@ -384,6 +397,7 @@ def destroy_project_docs(project, request):
 
 @view_config(
     route_name="manage.project.releases",
+    context=Project,
     renderer="manage/releases.html",
     uses_session=True,
     permission="manage",
@@ -395,6 +409,7 @@ def manage_project_releases(project, request):
 
 @view_defaults(
     route_name="manage.project.release",
+    context=Release,
     renderer="manage/release.html",
     uses_session=True,
     require_csrf=True,
@@ -423,7 +438,7 @@ class ManageProjectRelease:
         version = self.request.POST.get('confirm_version')
         if not version:
             self.request.session.flash(
-                "Must confirm the request.", queue='error'
+                "Must confirm the request", queue='error'
             )
             return HTTPSeeOther(
                 self.request.route_path(
@@ -450,7 +465,7 @@ class ManageProjectRelease:
         self.request.db.add(
             JournalEntry(
                 name=self.release.project.name,
-                action="remove",
+                action="remove release",
                 version=self.release.version,
                 submitted_by=self.request.user,
                 submitted_from=self.request.remote_addr,
@@ -460,7 +475,7 @@ class ManageProjectRelease:
         self.request.db.delete(self.release)
 
         self.request.session.flash(
-            f"Successfully deleted release {self.release.version!r}.",
+            f"Successfully deleted release {self.release.version!r}",
             queue="success",
         )
 
@@ -490,7 +505,7 @@ class ManageProjectRelease:
         project_name = self.request.POST.get('confirm_project_name')
 
         if not project_name:
-            return _error("Must confirm the request.")
+            return _error("Must confirm the request")
 
         try:
             release_file = (
@@ -502,7 +517,7 @@ class ManageProjectRelease:
                 .one()
             )
         except NoResultFound:
-            return _error('Could not find file.')
+            return _error('Could not find file')
 
         if project_name != self.release.project.name:
             return _error(
@@ -524,7 +539,7 @@ class ManageProjectRelease:
         self.request.db.delete(release_file)
 
         self.request.session.flash(
-            f"Successfully deleted file {release_file.filename!r}.",
+            f"Successfully deleted file {release_file.filename!r}",
             queue="success",
         )
 
@@ -539,6 +554,7 @@ class ManageProjectRelease:
 
 @view_config(
     route_name="manage.project.roles",
+    context=Project,
     renderer="manage/roles.html",
     uses_session=True,
     require_methods=False,
@@ -578,13 +594,18 @@ def manage_project_roles(project, request, _form_class=CreateRoleForm):
                 ),
             )
 
-            owners = (
+            owner_roles = (
                 request.db.query(Role)
                 .join(Role.user)
                 .filter(Role.role_name == 'Owner', Role.project == project)
             )
-            owner_emails = [owner.user.email for owner in owners]
-            owner_emails.remove(request.user.email)
+            owner_users = {owner.user for owner in owner_roles}
+
+            # Don't send to the owner that added the new role
+            owner_users.discard(request.user)
+
+            # Don't send owners email to new user if they are now an owner
+            owner_users.discard(user)
 
             send_collaborator_added_email(
                 request,
@@ -592,7 +613,7 @@ def manage_project_roles(project, request, _form_class=CreateRoleForm):
                 request.user,
                 project.name,
                 form.role_name.data,
-                owner_emails
+                owner_users,
             )
 
             send_added_as_collaborator_email(
@@ -600,7 +621,7 @@ def manage_project_roles(project, request, _form_class=CreateRoleForm):
                 request.user,
                 project.name,
                 form.role_name.data,
-                user.email
+                user,
             )
 
             request.session.flash(
@@ -631,6 +652,7 @@ def manage_project_roles(project, request, _form_class=CreateRoleForm):
 
 @view_config(
     route_name="manage.project.change_role",
+    context=Project,
     uses_session=True,
     require_methods=["POST"],
     permission="manage",
@@ -722,6 +744,7 @@ def change_project_role(project, request, _form_class=ChangeRoleForm):
 
 @view_config(
     route_name="manage.project.delete_role",
+    context=Project,
     uses_session=True,
     require_methods=["POST"],
     permission="manage",
@@ -767,6 +790,7 @@ def delete_project_role(project, request):
 
 @view_config(
     route_name="manage.project.history",
+    context=Project,
     renderer="manage/history.html",
     uses_session=True,
     permission="manage",
@@ -786,6 +810,7 @@ def manage_project_history(project, request):
 
 @view_config(
     route_name="manage.project.documentation",
+    context=Project,
     renderer="manage/documentation.html",
     uses_session=True,
     permission="manage",

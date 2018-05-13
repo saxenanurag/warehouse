@@ -11,12 +11,18 @@
 # limitations under the License.
 
 import binascii
+import urllib
 import os
 
 from elasticsearch.helpers import parallel_bulk
-from sqlalchemy.orm import lazyload, joinedload, load_only
+from elasticsearch_dsl import serializer
+from sqlalchemy import and_, func
+from sqlalchemy.orm import aliased
+import certifi
+import elasticsearch
 
-from warehouse.packaging.models import Release, Project
+from warehouse.packaging.models import (
+    Classifier, Project, Release, release_classifiers)
 from warehouse.packaging.search import Project as ProjectDocType
 from warehouse.search.utils import get_index
 from warehouse import tasks
@@ -24,23 +30,68 @@ from warehouse.utils.db import windowed_query
 
 
 def _project_docs(db):
-    releases = (
-        db.query(Release)
-          .options(load_only(
-                   "summary", "description", "author",
-                   "author_email", "maintainer", "maintainer_email",
-                   "home_page", "download_url", "keywords", "platform",
-                   "created"))
-          .options(lazyload("*"),
-                   (joinedload(Release.project)
-                    .load_only("normalized_name", "name")
-                    .joinedload(Project.releases)
-                    .load_only("version", "is_prerelease")),
-                   joinedload(Release._classifiers).load_only("classifier"))
-          .distinct(Release.name)
-          .order_by(Release.name, Release._pypi_ordering.desc())
+
+    releases_list = (
+        db.query(Release.name, Release.version)
+        .order_by(
+            Release.name,
+            Release.is_prerelease.nullslast(),
+            Release._pypi_ordering.desc(),
+        )
+        .distinct(Release.name)
+        .subquery("release_list")
     )
-    for release in windowed_query(releases, Release.name, 1000):
+
+    r = aliased(Release, name="r")
+
+    all_versions = (
+        db.query(func.array_agg(r.version))
+        .filter(r.name == Release.name)
+        .correlate(Release)
+        .as_scalar()
+        .label("all_versions")
+    )
+
+    classifiers = (
+        db.query(func.array_agg(Classifier.classifier))
+        .select_from(release_classifiers)
+        .join(Classifier, Classifier.id == release_classifiers.c.trove_id)
+        .filter(Release.name == release_classifiers.c.name)
+        .filter(Release.version == release_classifiers.c.version)
+        .correlate(Release)
+        .as_scalar()
+        .label("classifiers")
+    )
+
+    release_data = (
+        db.query(
+            Release.description,
+            Release.name,
+            Release.version.label("latest_version"),
+            all_versions,
+            Release.author,
+            Release.author_email,
+            Release.maintainer,
+            Release.maintainer_email,
+            Release.home_page,
+            Release.summary,
+            Release.keywords,
+            Release.platform,
+            Release.download_url,
+            Release.created,
+            classifiers,
+            Project.normalized_name,
+            Project.name,
+        )
+        .select_from(releases_list)
+        .join(Release, and_(
+            Release.name == releases_list.c.name,
+            Release.version == releases_list.c.version))
+        .outerjoin(Release.project)
+        .order_by(Release.name)
+    )
+
+    for release in windowed_query(release_data, Release.name, 50000):
         p = ProjectDocType.from_db(release)
         p.full_clean()
         yield p.to_dict(include_meta=True)
@@ -51,7 +102,15 @@ def reindex(request):
     """
     Recreate the Search Index.
     """
-    client = request.registry["elasticsearch.client"]
+    p = urllib.parse.urlparse(request.registry.settings["elasticsearch.url"])
+    client = elasticsearch.Elasticsearch(
+        [urllib.parse.urlunparse(p[:2] + ("",) * 4)],
+        verify_certs=True,
+        ca_certs=certifi.where(),
+        timeout=30,
+        retry_on_timeout=True,
+        serializer=serializer.serializer,
+    )
     number_of_replicas = request.registry.get("elasticsearch.replicas", 0)
     refresh_interval = request.registry.get("elasticsearch.interval", "1s")
 

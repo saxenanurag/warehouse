@@ -13,29 +13,15 @@ recommendations
 Migrating to the new PyPI
 -------------------------
 
-Warehouse is `currently in beta <http://pypi.org/help/#beta>`_. If
-your site/service used to link or upload to pypi.python.org, you
-should prepare to start using pypi.org instead.
+Warehouse has now replaced `the legacy PyPI site that was deployed at
+pypi.python.org <https://pypi.python.org/>`_. If your site/service
+used to link or upload to pypi.python.org, it may continue to work due
+to redirects, but you should use pypi.org instead.
 
-If you have an automated tool that hits pypi.python.org less often
-than once a second, and/or you are fine with small service
-interruptions during the beta, then you should go ahead and start
-using pypi.org now, and subscribe to `the PyPI announcement list
-(low-traffic)
+You should also watch `our status page <https://status.python.org/>`__
+and subscribe to `the PyPI announcement list (low-traffic)
 <https://mail.python.org/mm3/mailman3/lists/pypi-announce.python.org/>`_
-for further announcements.
-
-If you run a mission-critical automated production setup, or an
-automated tool that hits pypi.python.org with 1+ requests/second, then
-you should not explicitly point to pypi.org yet, but `you should test
-and prepare to switch
-<https://pyfound.blogspot.com/2018/03/warehouse-all-new-pypi-is-now-in-beta.html>`__. You
-should also watch `our status page <http://status.python.org/>`__,
-since we're occasionally redirecting portions of that traffic in load
-tests that we announce on the status page. Subscribe to `the PyPI
-announcement list (low-traffic)
-<https://mail.python.org/mm3/mailman3/lists/pypi-announce.python.org/>`_
-to find out when you should switch permanently.
+to find out about future changes.
 
 Here are some tips.
 
@@ -53,11 +39,6 @@ Here are some tips.
 * Shorter URL: ``https://pypi.org/p/{name}/`` will redirect to
   ``https://pypi.org/project/{name}/``.
 
-* Documentation upload: Users can no longer use ``doc_upload`` in the
-  API to upload documentation ZIP files, separate from packages, to be
-  hosted at pythonhosted.org (`discussion
-  <https://github.com/pypa/warehouse/issues/509>`_).
-
 * All APIs: `access is HTTPS-only
   <https://mail.python.org/pipermail/distutils-sig/2017-October/031712.html>`_
   (changed in October 2017). And pypi.org honors an ``Accept-Encoding:
@@ -67,9 +48,9 @@ Here are some tips.
   expected JSON response directly. See :doc:`json`.
 
 * XML-RPC API: see :ref:`changes-to-legacy-api`. Will be deprecated in
-  the future; switch to the RSS or JSON APIs. If you depend on an
-  XML-RPC call that our other APIs do not support, please `tell us
-  <https://pypi.org/help/#feedback>`_.
+  the future (no specific end date set yet); switch to the RSS or JSON
+  APIs. If you depend on an XML-RPC call that our other APIs do not
+  support, please `tell us <https://pypi.org/help/#feedback>`_.
 
 * Packages/updates RSS feeds: ``https://pypi.org/pypi?%3Aaction=rss``
   redirects to ``https://pypi.org/rss/updates.xml``, and
@@ -78,6 +59,18 @@ Here are some tips.
   descriptions. `The data differs from the legacy feed data because
   the new feeds are standards-compliant and fix inaccuracies in the
   publication date <https://github.com/pypa/warehouse/issues/3238>`_.
+
+* Documentation upload: Users can no longer use ``doc_upload`` in the
+  API to upload documentation ZIP files, separate from packages, to be
+  hosted at pythonhosted.org (`discussion
+  <https://github.com/pypa/warehouse/issues/509>`_).
+
+* ``User-Agent`` Filtering: Some client user agents were filtered to
+  always use ``legacy.pypi.org``, a temporary deployment of the legacy
+  PyPI codebase, regardless of brownouts or redirects, in order to
+  give them extra time to migrate. On 30 April 2018,
+  ``legacy.pypi.org`` was shut down, so all clients use ``pypi.org``
+  regardless of their ``User-Agent``.
 
 * Subscribe to `the PyPI announcement list (low-traffic)
   <https://mail.python.org/mm3/mailman3/lists/pypi-announce.python.org/>`_.

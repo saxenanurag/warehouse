@@ -160,7 +160,7 @@ class TestRegistrationForm:
         assert not form.validate()
         assert (
             form.password_confirm.errors.pop() ==
-            "Your passwords do not match. Please try again."
+            "Your passwords do not match. Try again."
         )
 
     def test_passwords_match_success(self):
@@ -206,7 +206,7 @@ class TestRegistrationForm:
         assert (
             form.email.errors.pop() ==
             "The email address you have chosen is not a valid format. "
-            "Please try again."
+            "Try again."
         )
 
     def test_email_exists_error(self):
@@ -223,7 +223,7 @@ class TestRegistrationForm:
         assert (
             form.email.errors.pop() ==
             "This email address is already being used by another account. "
-            "Please use a different email."
+            "Use a different email."
         )
 
     def test_blacklisted_email_error(self):
@@ -237,8 +237,8 @@ class TestRegistrationForm:
         assert not form.validate()
         assert (
             form.email.errors.pop() ==
-            "Sorry, you cannot create an account with an email address from "
-            "this domain. Please use a different email."
+            "You cannot create an account with an email address from "
+            "this domain. Use a different email."
         )
 
     def test_username_exists(self):
@@ -252,7 +252,7 @@ class TestRegistrationForm:
         assert (
             form.username.errors.pop() ==
             "This username is already being used by another account. "
-            "Please choose a different username."
+            "Choose a different username."
         )
 
     @pytest.mark.parametrize("username", ['_foo', 'bar_', 'foo^bar'])
@@ -270,7 +270,7 @@ class TestRegistrationForm:
             "must be composed of letters, numbers, "
             "dots, hyphens and underscores. And must "
             "also start and finish with a letter or number. "
-            "Please choose a different username."
+            "Choose a different username."
         )
 
     def test_password_strength(self):
@@ -286,6 +286,20 @@ class TestRegistrationForm:
             )
             form.validate()
             assert (len(form.new_password.errors) == 0) == valid
+
+    def test_name_too_long(self):
+        form = forms.RegistrationForm(
+            data={"full_name": "hello " * 50},
+            user_service=pretend.stub(
+                find_userid=pretend.call_recorder(lambda _: None),
+            ),
+        )
+        assert not form.validate()
+        assert (
+            form.full_name.errors.pop() ==
+            "The name you have chosen is too long. Choose "
+            "a name with under 100 characters."
+        )
 
 
 class TestRequestPasswordResetForm:
@@ -356,7 +370,7 @@ class TestResetPasswordForm:
         assert not form.validate()
         assert (
             form.password_confirm.errors.pop() ==
-            "Your passwords do not match. Please try again."
+            "Your passwords do not match. Try again."
         )
 
     @pytest.mark.parametrize(("password", "expected"), [

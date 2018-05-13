@@ -11,12 +11,11 @@ Contents:
    api-reference/index
    ui-principles
    security
+   roadmap
 
-Warehouse is a new code base that implements a `Python package index
-(repository)`_.  It is being `actively developed`_ and will eventually
-power PyPI_ and replace an older code base that is currently powering
-PyPI.  You can see a beta version of Warehouse at https://pypi.org/
-and you can read the `Warehouse roadmap`_.
+Warehouse is a `web application`_ that implements the canonical
+`Python package index (repository)`_; its production deployment is
+PyPI_. It replaces an older code base that powered pypi.python.org.
 
 The goal is to improve PyPI by making it:
 
@@ -27,7 +26,6 @@ The goal is to improve PyPI by making it:
 - have more maintainable code with test coverage, docs, etc.
 
 
-
 Indices and tables
 ==================
 
@@ -36,6 +34,5 @@ Indices and tables
 * :ref:`search`
 
 .. _`Python package index (repository)`: https://packaging.python.org/glossary/#term-package-index
-.. _`actively developed`: https://github.com/pypa/warehouse
-.. _PyPI: https://pypi.python.org
-.. _`Warehouse roadmap`: https://wiki.python.org/psf/WarehouseRoadmap
+.. _`web application`: https://github.com/pypa/warehouse
+.. _PyPI: https://pypi.org

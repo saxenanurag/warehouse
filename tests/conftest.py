@@ -72,6 +72,7 @@ def datadog():
     return pretend.stub(
         event=pretend.call_recorder(lambda *args, **kwargs: None),
         increment=pretend.call_recorder(lambda *args, **kwargs: None),
+        histogram=pretend.call_recorder(lambda *args, **kwargs: None),
     )
 
 
@@ -119,6 +120,7 @@ def app_config(database):
             "elasticsearch.url": "https://localhost/warehouse",
             "files.backend": "warehouse.packaging.services.LocalFileStorage",
             "docs.backend": "warehouse.packaging.services.LocalFileStorage",
+            "mail.backend": "warehouse.email.services.SMTPEmailSender",
             "files.url": "http://localhost:7000/",
             "sessions.secret": "123456",
             "sessions.url": "redis://localhost:0/",

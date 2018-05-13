@@ -76,12 +76,15 @@ def includeme(config):
         domain=warehouse,
     )
     config.add_route(
-        "includes.edit-profile-button",
-        "/_includes/edit-profile-button/{username}",
+        "includes.profile-actions",
+        "/_includes/profile-actions/{username}",
         factory="warehouse.accounts.models:UserFactory",
         traverse="/{username}",
         domain=warehouse,
     )
+
+    # Classifier Routes
+    config.add_route("classifiers", "/classifiers/", domain=warehouse)
 
     # Search Routes
     config.add_route("search", "/search/", domain=warehouse)
@@ -209,6 +212,9 @@ def includeme(config):
     )
     config.add_route("packaging.file", files_url)
 
+    # SES Webhooks
+    config.add_route("ses.hook", "/_/ses-hook/", domain=warehouse)
+
     # RSS
     config.add_route("rss.updates", "/rss/updates.xml", domain=warehouse)
     config.add_route("rss.packages", "/rss/packages.xml", domain=warehouse)
@@ -273,11 +279,43 @@ def includeme(config):
         "list_classifiers",
         domain=warehouse,
     )
+    config.add_pypi_action_route(
+        'legacy.api.pypi.search',
+        'search',
+        domain=warehouse,
+    )
+    config.add_pypi_action_route(
+        'legacy.api.pypi.browse',
+        'browse',
+        domain=warehouse,
+    )
+    config.add_pypi_action_route(
+        'legacy.api.pypi.files',
+        'files',
+        domain=warehouse,
+    )
+    config.add_pypi_action_route(
+        'legacy.api.pypi.display',
+        'display',
+        domain=warehouse,
+    )
 
     # Legacy XMLRPC
     config.add_xmlrpc_endpoint(
         "pypi",
         pattern="/pypi",
+        header="Content-Type:text/xml",
+        domain=warehouse,
+    )
+    config.add_xmlrpc_endpoint(
+        "pypi_slash",
+        pattern="/pypi/",
+        header="Content-Type:text/xml",
+        domain=warehouse,
+    )
+    config.add_xmlrpc_endpoint(
+        "RPC2",
+        pattern="/RPC2",
         header="Content-Type:text/xml",
         domain=warehouse,
     )

@@ -39,6 +39,7 @@ from warehouse.packaging.models import (
 from warehouse.admin.flags import AdminFlag
 
 from ...common.db.accounts import UserFactory, EmailFactory
+from ...common.db.classifiers import ClassifierFactory
 from ...common.db.packaging import (
     ProjectFactory, ReleaseFactory, FileFactory, RoleFactory,
 )
@@ -325,6 +326,31 @@ class TestValidation:
         form, field = pretend.stub(), pretend.stub(data=data)
         with pytest.raises(ValidationError):
             legacy._validate_description_content_type(form, field)
+
+    def test_validate_no_deprecated_classifiers_valid(self, db_request):
+        valid_classifier = ClassifierFactory(deprecated=False)
+        validator = legacy._no_deprecated_classifiers(db_request)
+
+        form = pretend.stub()
+        field = pretend.stub(data=[valid_classifier.classifier])
+
+        validator(form, field)
+
+    def test_validate_no_deprecated_classifiers_invalid(self, db_request):
+        deprecated_classifier = ClassifierFactory(
+            classifier='AA: BB', deprecated=True,
+        )
+        validator = legacy._no_deprecated_classifiers(db_request)
+        db_request.registry = pretend.stub(
+            settings={'warehouse.domain': 'host'}
+        )
+        db_request.route_url = pretend.call_recorder(lambda *a, **kw: '/url')
+
+        form = pretend.stub()
+        field = pretend.stub(data=[deprecated_classifier.classifier])
+
+        with pytest.raises(ValidationError):
+            validator(form, field)
 
 
 def test_construct_dependencies():
@@ -959,8 +985,8 @@ class TestFileUpload:
             ),
         })
 
-        db_request.route_url = pretend.call_recorder(
-            lambda route, **kw: "/the/help/url/"
+        db_request.help_url = pretend.call_recorder(
+            lambda **kw: "/the/help/url/"
         )
 
         with pytest.raises(HTTPBadRequest) as excinfo:
@@ -968,8 +994,8 @@ class TestFileUpload:
 
         resp = excinfo.value
 
-        assert db_request.route_url.calls == [
-            pretend.call('help', _anchor='project-name')
+        assert db_request.help_url.calls == [
+            pretend.call(_anchor='project-name')
         ]
 
         assert resp.status_code == 400
@@ -1005,8 +1031,8 @@ class TestFileUpload:
             ),
         })
 
-        db_request.route_url = pretend.call_recorder(
-            lambda route, **kw: "/the/help/url/"
+        db_request.help_url = pretend.call_recorder(
+            lambda **kw: "/the/help/url/"
         )
 
         with pytest.raises(HTTPBadRequest) as excinfo:
@@ -1014,8 +1040,8 @@ class TestFileUpload:
 
         resp = excinfo.value
 
-        assert db_request.route_url.calls == [
-            pretend.call('help', _anchor='project-name')
+        assert db_request.help_url.calls == [
+            pretend.call(_anchor='project-name')
         ]
 
         assert resp.status_code == 400
@@ -1045,8 +1071,8 @@ class TestFileUpload:
             ),
         })
 
-        db_request.route_url = pretend.call_recorder(
-            lambda route, **kw: "/the/help/url/"
+        db_request.help_url = pretend.call_recorder(
+            lambda **kw: "/the/help/url/"
         )
 
         with pytest.raises(HTTPForbidden) as excinfo:
@@ -1522,6 +1548,48 @@ class TestFileUpload:
             "for this field"
         )
 
+    def test_upload_fails_with_deprecated_classifier(
+            self, pyramid_config, db_request):
+        pyramid_config.testing_securitypolicy(userid=1)
+
+        user = UserFactory.create()
+        EmailFactory.create(user=user)
+        project = ProjectFactory.create()
+        release = ReleaseFactory.create(project=project, version="1.0")
+        RoleFactory.create(user=user, project=project)
+        classifier = ClassifierFactory(classifier='AA :: BB', deprecated=True)
+
+        filename = "{}-{}.tar.gz".format(project.name, release.version)
+
+        db_request.POST = MultiDict({
+            "metadata_version": "1.2",
+            "name": project.name,
+            "version": release.version,
+            "filetype": "sdist",
+            "md5_digest": "335c476dc930b959dda9ec82bd65ef19",
+            "content": pretend.stub(
+                filename=filename,
+                file=io.BytesIO(b"A fake file."),
+                type="application/tar",
+            ),
+        })
+        db_request.POST.extend([
+            ("classifiers", classifier.classifier),
+        ])
+        db_request.route_url = pretend.call_recorder(lambda *a, **kw: '/url')
+
+        with pytest.raises(HTTPBadRequest) as excinfo:
+            legacy.file_upload(db_request)
+
+        resp = excinfo.value
+
+        assert resp.status_code == 400
+        assert resp.status == (
+            "400 Invalid value for classifiers. "
+            "Error: Classifier 'AA :: BB' has been deprecated, see /url "
+            "for a list of valid classifiers."
+        )
+
     @pytest.mark.parametrize(
         "digests",
         [
@@ -1650,8 +1718,8 @@ class TestFileUpload:
                 type="application/tar",
             ),
         })
-        db_request.route_url = pretend.call_recorder(
-            lambda route, **kw: "/the/help/url/"
+        db_request.help_url = pretend.call_recorder(
+            lambda **kw: "/the/help/url/"
         )
 
         with pytest.raises(HTTPBadRequest) as excinfo:
@@ -1659,8 +1727,8 @@ class TestFileUpload:
 
         resp = excinfo.value
 
-        assert db_request.route_url.calls == [
-            pretend.call('help', _anchor='file-size-limit')
+        assert db_request.help_url.calls == [
+            pretend.call(_anchor='file-size-limit')
         ]
         assert resp.status_code == 400
         assert resp.status == (
@@ -1732,8 +1800,8 @@ class TestFileUpload:
         })
 
         db_request.db.add(Filename(filename=filename))
-        db_request.route_url = pretend.call_recorder(
-            lambda route, **kw: "/the/help/url/"
+        db_request.help_url = pretend.call_recorder(
+            lambda **kw: "/the/help/url/"
         )
 
         with pytest.raises(HTTPBadRequest) as excinfo:
@@ -1741,8 +1809,8 @@ class TestFileUpload:
 
         resp = excinfo.value
 
-        assert db_request.route_url.calls == [
-            pretend.call('help', _anchor='file-name-reuse')
+        assert db_request.help_url.calls == [
+            pretend.call(_anchor='file-name-reuse'),
         ]
         assert resp.status_code == 400
         assert resp.status == (
@@ -1846,16 +1914,16 @@ class TestFileUpload:
                 ),
             ),
         )
-        db_request.route_url = pretend.call_recorder(
-            lambda route, **kw: "/the/help/url/"
+        db_request.help_url = pretend.call_recorder(
+            lambda **kw: "/the/help/url/"
         )
         with pytest.raises(HTTPBadRequest) as excinfo:
             legacy.file_upload(db_request)
 
         resp = excinfo.value
 
-        assert db_request.route_url.calls == [
-            pretend.call('help', _anchor='file-name-reuse')
+        assert db_request.help_url.calls == [
+            pretend.call(_anchor='file-name-reuse')
         ]
         assert resp.status_code == 400
         assert resp.status == "400 File already exists. See /the/help/url/"
@@ -1904,8 +1972,8 @@ class TestFileUpload:
                 ),
             ),
         )
-        db_request.route_url = pretend.call_recorder(
-            lambda route, **kw: "/the/help/url/"
+        db_request.help_url = pretend.call_recorder(
+            lambda **kw: "/the/help/url/"
         )
 
         with pytest.raises(HTTPBadRequest) as excinfo:
@@ -1913,8 +1981,8 @@ class TestFileUpload:
 
         resp = excinfo.value
 
-        assert db_request.route_url.calls == [
-            pretend.call('help', _anchor='file-name-reuse')
+        assert db_request.help_url.calls == [
+            pretend.call(_anchor='file-name-reuse')
         ]
         assert resp.status_code == 400
         assert resp.status == "400 File already exists. See /the/help/url/"
@@ -2058,8 +2126,8 @@ class TestFileUpload:
             ),
         })
 
-        db_request.route_url = pretend.call_recorder(
-            lambda route, **kw: "/the/help/url/"
+        db_request.help_url = pretend.call_recorder(
+            lambda **kw: "/the/help/url/"
         )
 
         with pytest.raises(HTTPForbidden) as excinfo:
@@ -2067,8 +2135,8 @@ class TestFileUpload:
 
         resp = excinfo.value
 
-        assert db_request.route_url.calls == [
-            pretend.call('help', _anchor='project-name')
+        assert db_request.help_url.calls == [
+            pretend.call(_anchor='project-name')
         ]
         assert resp.status_code == 403
         assert resp.status == (
@@ -2762,8 +2830,8 @@ class TestFileUpload:
             resp = legacy.file_upload(db_request)
             assert resp.status_code == 200
         else:
-            db_request.route_url = pretend.call_recorder(
-                lambda route, **kw: "/the/help/url/"
+            db_request.help_url = pretend.call_recorder(
+                lambda **kw: "/the/help/url/"
             )
 
             with pytest.raises(HTTPBadRequest) as excinfo:
@@ -2771,8 +2839,8 @@ class TestFileUpload:
 
             resp = excinfo.value
 
-            assert db_request.route_url.calls == [
-                pretend.call('help', _anchor='verified-email')
+            assert db_request.help_url.calls == [
+                pretend.call(_anchor='verified-email')
             ]
             assert resp.status_code == 400
             assert resp.status == (
@@ -2810,23 +2878,9 @@ class TestFileUpload:
         db_request.find_service = lambda svc, name=None: storage_service
         db_request.remote_addr = "10.10.10.10"
 
-        tm = pretend.stub(
-            addAfterCommitHook=pretend.call_recorder(lambda *a, **kw: None),
-        )
-        db_request.tm = pretend.stub(get=lambda: tm)
-
-        db_request.registry.settings["warehouse.legacy_domain"] = "example.com"
-
         resp = legacy.file_upload(db_request)
 
         assert resp.status_code == 200
-        assert tm.addAfterCommitHook.calls == [
-            pretend.call(
-                legacy._legacy_purge,
-                args=["https://example.com/pypi"],
-                kws={"data": {":action": "purge", "project": "example"}},
-            ),
-        ]
 
     def test_fails_in_read_only_mode(self, pyramid_request):
         pyramid_request.flags = pretend.stub(enabled=lambda *a: True)

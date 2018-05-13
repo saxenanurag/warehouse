@@ -16,6 +16,7 @@ from collections import OrderedDict
 from urllib.parse import urlparse
 
 import packaging.utils
+
 from citext import CIText
 from pyramid.security import Allow
 from pyramid.threadlocal import get_current_request
@@ -135,6 +136,7 @@ class Project(SitemapMixin, db.ModelBase):
         backref="project",
         cascade="all, delete-orphan",
         order_by=lambda: Release._pypi_ordering.desc(),
+        passive_deletes=True,
     )
 
     def __getitem__(self, version):
@@ -154,13 +156,20 @@ class Project(SitemapMixin, db.ModelBase):
             # There are multiple releases of this project which have the same
             # canonical version that were uploaded before we checked for
             # canonical version equivalence, so return the exact match instead
-            return (
-                session.query(Release)
-                .filter(
-                    (Release.project == self) & (Release.version == version)
+            try:
+                return (
+                    session.query(Release)
+                    .filter(
+                        (Release.project == self) &
+                        (Release.version == version)
+                    )
+                    .one()
                 )
-                .one()
-            )
+            except NoResultFound:
+                # There are multiple releases of this project which have the
+                # same canonical version, but none that have the exact version
+                # specified, so just 404
+                raise KeyError from None
         except NoResultFound:
             raise KeyError from None
 
@@ -194,6 +203,30 @@ class Project(SitemapMixin, db.ModelBase):
             return
 
         return request.route_url("legacy.docs", project=self.name)
+
+    @property
+    def all_versions(self):
+        return (orm.object_session(self)
+                   .query(
+                       Release.version,
+                       Release.created,
+                       Release.is_prerelease)
+                   .filter(Release.project == self)
+                   .order_by(Release._pypi_ordering.desc())
+                   .all())
+
+    @property
+    def latest_version(self):
+        return (orm.object_session(self)
+                   .query(
+                       Release.version,
+                       Release.created,
+                       Release.is_prerelease)
+                   .filter(Release.project == self)
+                   .order_by(
+                       Release.is_prerelease.nullslast(),
+                       Release._pypi_ordering.desc())
+                   .first())
 
 
 class DependencyKind(enum.IntEnum):
@@ -316,6 +349,7 @@ class Release(db.ModelBase):
         backref="project_releases",
         secondary=lambda: release_classifiers,
         order_by=Classifier.classifier,
+        passive_deletes=True,
     )
     classifiers = association_proxy("_classifiers", "classifier")
 
@@ -325,6 +359,7 @@ class Release(db.ModelBase):
         cascade="all, delete-orphan",
         lazy="dynamic",
         order_by=lambda: File.filename,
+        passive_deletes=True,
     )
 
     dependencies = orm.relationship("Dependency")
@@ -412,7 +447,8 @@ class Release(db.ModelBase):
     def github_repo_info_url(self):
         for parsed in [urlparse(url) for url in self.urls.values()]:
             segments = parsed.path.strip('/').rstrip('/').split('/')
-            if parsed.netloc == 'github.com' and len(segments) >= 2:
+            if (parsed.netloc == 'github.com' or
+                    parsed.netloc == 'www.github.com') and len(segments) >= 2:
                 user_name, repo_name = segments[:2]
                 return f"https://api.github.com/repos/{user_name}/{repo_name}"
 

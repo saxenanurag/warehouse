@@ -11,7 +11,6 @@
 # limitations under the License.
 
 import binascii
-import cgi
 import collections
 import enum
 import hmac
@@ -25,20 +24,10 @@ import html5lib.treewalkers
 import jinja2
 
 import packaging.version
-import readme_renderer.markdown
-import readme_renderer.rst
-import readme_renderer.txt
 
 from pyramid.threadlocal import get_current_request
 
 from warehouse.utils.http import is_valid_uri
-
-_renderers = {
-    '': readme_renderer.rst,  # Default if description_content_type is None
-    'text/plain': readme_renderer.txt,
-    'text/x-rst': readme_renderer.rst,
-    'text/markdown': readme_renderer.markdown,
-}
 
 
 class PackageType(enum.Enum):
@@ -59,8 +48,9 @@ def format_package_type(value):
         return value
 
 
-def _camo_url(camo_url, camo_key, url):
-    camo_key = camo_key.encode("utf8")
+def _camo_url(request, url):
+    camo_url = request.registry.settings["camo.url"].format(request=request)
+    camo_key = request.registry.settings["camo.key"].encode("utf8")
     url = url.encode("utf8")
 
     path = "/".join([
@@ -72,41 +62,25 @@ def _camo_url(camo_url, camo_key, url):
 
 
 @jinja2.contextfilter
-def readme(ctx, value, *, description_content_type):
+def camoify(ctx, value):
     request = ctx.get("request") or get_current_request()
-
-    camo_url = request.registry.settings["camo.url"].format(request=request)
-    camo_key = request.registry.settings["camo.key"]
-
-    content_type, parameters = cgi.parse_header(description_content_type or '')
-
-    # Get the appropriate renderer
-    renderer = _renderers[content_type]
-
-    # Actually render the given value, this will not only render the value, but
-    # also ensure that it's had any disallowed markup removed.
-    rendered = renderer.render(value, **parameters)
-
-    # If the content was not rendered, we'll render as plaintext instead
-    if rendered is None:
-        rendered = readme_renderer.txt.render(value)
 
     # Parse the rendered output and replace any inline images that don't point
     # to HTTPS with camouflaged images.
     tree_builder = html5lib.treebuilders.getTreeBuilder("dom")
     parser = html5lib.html5parser.HTMLParser(tree=tree_builder)
-    dom = parser.parse(rendered)
+    dom = parser.parse(value)
 
     for element in dom.getElementsByTagName("img"):
         src = element.getAttribute("src")
         if src:
-            element.setAttribute("src", _camo_url(camo_url, camo_key, src))
+            element.setAttribute("src", request.camo_url(src))
 
     tree_walker = html5lib.treewalkers.getTreeWalker("dom")
     html_serializer = html5lib.serializer.HTMLSerializer()
-    rendered = "".join(html_serializer.serialize(tree_walker(dom)))
+    camoed = "".join(html_serializer.serialize(tree_walker(dom)))
 
-    return jinja2.Markup(rendered)
+    return camoed
 
 
 _SI_SYMBOLS = ["k", "M", "G", "T", "P", "E", "Z", "Y"]
@@ -177,3 +151,7 @@ def contains_valid_uris(items):
 
 def parse_version(version_str):
     return packaging.version.parse(version_str)
+
+
+def includeme(config):
+    config.add_request_method(_camo_url, name="camo_url")
