@@ -21,7 +21,7 @@ from sqlalchemy.orm.exc import NoResultFound
 from webob.multidict import MultiDict
 
 from warehouse.manage import views
-from warehouse.accounts.interfaces import IUserService
+from warehouse.accounts.interfaces import IUserService, IPasswordBreachedService
 from warehouse.packaging.models import JournalEntry, Project, Role, User
 from warehouse.utils.project import remove_documentation
 
@@ -37,10 +37,15 @@ from ...common.db.packaging import (
 
 class TestManageAccount:
     def test_default_response(self, monkeypatch):
+        breach_service = pretend.stub()
         user_service = pretend.stub()
         name = pretend.stub()
         request = pretend.stub(
-            find_service=lambda *a, **kw: user_service, user=pretend.stub(name=name)
+            find_service=lambda iface, **kw: {
+                IPasswordBreachedService: breach_service,
+                IUserService: user_service,
+            }[iface],
+            user=pretend.stub(name=name),
         )
         save_account_obj = pretend.stub()
         save_account_cls = pretend.call_recorder(lambda **kw: save_account_obj)
@@ -68,7 +73,9 @@ class TestManageAccount:
         assert view.user_service == user_service
         assert save_account_cls.calls == [pretend.call(name=name)]
         assert add_email_cls.calls == [pretend.call(user_service=user_service)]
-        assert change_pass_cls.calls == [pretend.call(user_service=user_service)]
+        assert change_pass_cls.calls == [
+            pretend.call(user_service=user_service, breach_service=breach_service)
+        ]
 
     def test_active_projects(self, db_request):
         user = UserFactory.create()
@@ -206,7 +213,7 @@ class TestManageAccount:
                 queue="success",
             )
         ]
-        assert send_email.calls == [pretend.call(request, request.user, email)]
+        assert send_email.calls == [pretend.call(request, (request.user, email))]
 
     def test_add_email_validation_fails(self, monkeypatch):
         email_address = "test@example.com"
@@ -339,7 +346,7 @@ class TestManageAccount:
         monkeypatch.setattr(views, "send_primary_email_change_email", send_email)
         assert view.change_primary_email() == view.default_response
         assert send_email.calls == [
-            pretend.call(db_request, db_request.user, old_primary.email)
+            pretend.call(db_request, (db_request.user, old_primary))
         ]
         assert db_request.session.flash.calls == [
             pretend.call(
@@ -347,6 +354,31 @@ class TestManageAccount:
             )
         ]
         assert not old_primary.primary
+        assert new_primary.primary
+
+    def test_change_primary_email_without_current(self, monkeypatch, db_request):
+        user = UserFactory()
+        new_primary = EmailFactory(primary=False, verified=True, user=user)
+
+        db_request.user = user
+
+        db_request.find_service = lambda *a, **kw: pretend.stub()
+        db_request.POST = {"primary_email_id": new_primary.id}
+        db_request.session.flash = pretend.call_recorder(lambda *a, **kw: None)
+        monkeypatch.setattr(
+            views.ManageAccountViews, "default_response", {"_": pretend.stub()}
+        )
+        view = views.ManageAccountViews(db_request)
+
+        send_email = pretend.call_recorder(lambda *a: None)
+        monkeypatch.setattr(views, "send_primary_email_change_email", send_email)
+        assert view.change_primary_email() == view.default_response
+        assert send_email.calls == []
+        assert db_request.session.flash.calls == [
+            pretend.call(
+                f"Email address {new_primary.email} set as primary", queue="success"
+            )
+        ]
         assert new_primary.primary
 
     def test_change_primary_email_not_found(self, monkeypatch, db_request):
@@ -394,7 +426,7 @@ class TestManageAccount:
         assert request.session.flash.calls == [
             pretend.call("Verification email for email_address resent", queue="success")
         ]
-        assert send_email.calls == [pretend.call(request, request.user, email)]
+        assert send_email.calls == [pretend.call(request, (request.user, email))]
 
     def test_reverify_email_not_found(self, monkeypatch):
         def raise_no_result():
@@ -1152,6 +1184,7 @@ class TestManageProjectRoles:
     def test_post_new_role(self, monkeypatch, db_request):
         project = ProjectFactory.create(name="foobar")
         new_user = UserFactory.create(username="new_user")
+        EmailFactory.create(user=new_user, verified=True, primary=True)
         owner_1 = UserFactory.create(username="owner_1")
         owner_2 = UserFactory.create(username="owner_2")
         owner_1_role = RoleFactory.create(
@@ -1181,12 +1214,12 @@ class TestManageProjectRoles:
             flash=pretend.call_recorder(lambda *a, **kw: None)
         )
 
-        send_collaborator_added_email = pretend.call_recorder(lambda *a: None)
+        send_collaborator_added_email = pretend.call_recorder(lambda r, u, **k: None)
         monkeypatch.setattr(
             views, "send_collaborator_added_email", send_collaborator_added_email
         )
 
-        send_added_as_collaborator_email = pretend.call_recorder(lambda *a: None)
+        send_added_as_collaborator_email = pretend.call_recorder(lambda r, u, **k: None)
         monkeypatch.setattr(
             views, "send_added_as_collaborator_email", send_added_as_collaborator_email
         )
@@ -1208,21 +1241,21 @@ class TestManageProjectRoles:
         assert send_collaborator_added_email.calls == [
             pretend.call(
                 db_request,
-                new_user,
-                db_request.user,
-                project.name,
-                form_obj.role_name.data,
                 {owner_2},
+                user=new_user,
+                submitter=db_request.user,
+                project_name=project.name,
+                role=form_obj.role_name.data,
             )
         ]
 
         assert send_added_as_collaborator_email.calls == [
             pretend.call(
                 db_request,
-                db_request.user,
-                project.name,
-                form_obj.role_name.data,
                 new_user,
+                submitter=db_request.user,
+                project_name=project.name,
+                role=form_obj.role_name.data,
             )
         ]
 
@@ -1293,6 +1326,54 @@ class TestManageProjectRoles:
             "roles_by_user": {user.username: [role]},
             "form": form_obj,
         }
+
+    @pytest.mark.parametrize("with_email", [True, False])
+    def test_post_unverified_email(self, db_request, with_email):
+        project = ProjectFactory.create(name="foobar")
+        user = UserFactory.create(username="testuser")
+        if with_email:
+            EmailFactory.create(user=user, verified=False, primary=True)
+
+        user_service = pretend.stub(
+            find_userid=lambda username: user.id, get_user=lambda userid: user
+        )
+        db_request.find_service = pretend.call_recorder(
+            lambda iface, context: user_service
+        )
+        db_request.method = "POST"
+        db_request.POST = pretend.stub()
+        form_obj = pretend.stub(
+            validate=pretend.call_recorder(lambda: True),
+            username=pretend.stub(data=user.username),
+            role_name=pretend.stub(data="Owner"),
+        )
+        form_class = pretend.call_recorder(lambda *a, **kw: form_obj)
+        db_request.session = pretend.stub(
+            flash=pretend.call_recorder(lambda *a, **kw: None)
+        )
+
+        result = views.manage_project_roles(project, db_request, _form_class=form_class)
+
+        assert db_request.find_service.calls == [
+            pretend.call(IUserService, context=None)
+        ]
+        assert form_obj.validate.calls == [pretend.call()]
+        assert form_class.calls == [
+            pretend.call(db_request.POST, user_service=user_service),
+            pretend.call(user_service=user_service),
+        ]
+        assert db_request.session.flash.calls == [
+            pretend.call(
+                "User 'testuser' does not have a verified primary email address "
+                "and cannot be added as a Owner for project.",
+                queue="error",
+            )
+        ]
+
+        # No additional roles are created
+        assert db_request.db.query(Role).all() == []
+
+        assert result == {"project": project, "roles_by_user": {}, "form": form_obj}
 
 
 class TestChangeProjectRoles:

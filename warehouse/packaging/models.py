@@ -46,6 +46,7 @@ from warehouse import db
 from warehouse.accounts.models import User
 from warehouse.classifiers.models import Classifier
 from warehouse.sitemap.models import SitemapMixin
+from warehouse.utils import dotted_navigator
 from warehouse.utils.attrs import make_repr
 
 
@@ -111,11 +112,6 @@ class Project(SitemapMixin, db.ModelBase):
 
     name = Column(Text, primary_key=True, nullable=False)
     normalized_name = orm.column_property(func.normalize_pep426_name(name))
-    stable_version = Column(Text)
-    autohide = Column(Boolean, server_default=sql.true())
-    comments = Column(Boolean, server_default=sql.true())
-    bugtrack_url = Column(Text)
-    hosting_mode = Column(Text, nullable=False, server_default="pypi-only")
     created = Column(
         DateTime(timezone=False), nullable=False, server_default=sql.func.now()
     )
@@ -178,7 +174,7 @@ class Project(SitemapMixin, db.ModelBase):
             query.all(), key=lambda x: ["Owner", "Maintainer"].index(x.role_name)
         ):
             if role.role_name == "Owner":
-                acls.append((Allow, str(role.user.id), ["manage", "upload"]))
+                acls.append((Allow, str(role.user.id), ["manage:project", "upload"]))
             else:
                 acls.append((Allow, str(role.user.id), ["upload"]))
         return acls
@@ -235,8 +231,6 @@ class Dependency(db.Model):
 
     __tablename__ = "release_dependencies"
     __table_args__ = (
-        Index("rel_dep_name_idx", "name"),
-        Index("rel_dep_name_version_idx", "name", "version"),
         Index("rel_dep_name_version_kind_idx", "name", "version", "kind"),
         ForeignKeyConstraint(
             ["name", "version"],
@@ -274,12 +268,12 @@ class Release(db.ModelBase):
         return (
             Index("release_created_idx", cls.created.desc()),
             Index("release_name_created_idx", cls.name, cls.created.desc()),
-            Index("release_name_idx", cls.name),
-            Index("release_pypi_hidden_idx", cls._pypi_hidden),
             Index("release_version_idx", cls.version),
         )
 
     __repr__ = make_repr("name", "version")
+    __parent__ = dotted_navigator("project")
+    __name__ = dotted_navigator("version")
 
     name = Column(
         Text,
@@ -301,9 +295,7 @@ class Release(db.ModelBase):
     platform = Column(Text)
     download_url = Column(Text)
     _pypi_ordering = Column(Integer)
-    _pypi_hidden = Column(Boolean)
     requires_python = Column(Text)
-    description_from_readme = Column(Boolean)
     created = Column(
         DateTime(timezone=False), nullable=False, server_default=sql.func.now()
     )
@@ -382,22 +374,7 @@ class Release(db.ModelBase):
         viewonly=True,
     )
 
-    def __acl__(self):
-        session = orm.object_session(self)
-        acls = [(Allow, "group:admins", "admin")]
-
-        # Get all of the users for this project.
-        query = session.query(Role).filter(Role.project == self)
-        query = query.options(orm.lazyload("project"))
-        query = query.options(orm.joinedload("user").lazyload("emails"))
-        for role in sorted(
-            query.all(), key=lambda x: ["Owner", "Maintainer"].index(x.role_name)
-        ):
-            if role.role_name == "Owner":
-                acls.append((Allow, str(role.user.id), ["manage", "upload"]))
-            else:
-                acls.append((Allow, str(role.user.id), ["upload"]))
-        return acls
+    uploaded_via = Column(Text)
 
     @property
     def urls(self):
@@ -456,7 +433,6 @@ class File(db.Model):
             CheckConstraint("sha256_digest ~* '^[A-F0-9]{64}$'"),
             CheckConstraint("blake2_256_digest ~* '^[A-F0-9]{64}$'"),
             Index("release_files_name_version_idx", "name", "version"),
-            Index("release_files_packagetype_idx", "packagetype"),
             Index("release_files_version_idx", "version"),
             Index(
                 "release_files_single_sdist",
@@ -496,14 +472,12 @@ class File(db.Model):
     sha256_digest = Column(CIText, unique=True, nullable=False)
     blake2_256_digest = Column(CIText, unique=True, nullable=False)
     upload_time = Column(DateTime(timezone=False), server_default=func.now())
+    uploaded_via = Column(Text)
+
     # We need this column to allow us to handle the currently existing "double"
     # sdists that exist in our database. Eventually we should try to get rid
     # of all of them and then remove this column.
     allow_multiple_sdist = Column(Boolean, nullable=False, server_default=sql.false())
-
-    # TODO: Once Legacy PyPI is gone, then we should remove this column
-    #       completely as we no longer use it.
-    downloads = Column(Integer, server_default=sql.text("0"))
 
     @hybrid_property
     def pgp_path(self):
@@ -538,7 +512,6 @@ release_classifiers = Table(
         onupdate="CASCADE",
         ondelete="CASCADE",
     ),
-    Index("rel_class_name_idx", "name"),
     Index("rel_class_name_version_idx", "name", "version"),
     Index("rel_class_trove_id_idx", "trove_id"),
     Index("rel_class_version_id_idx", "version"),
@@ -553,18 +526,9 @@ class JournalEntry(db.ModelBase):
     def __table_args__(cls):  # noqa
         return (
             Index("journals_changelog", "submitted_date", "name", "version", "action"),
-            Index("journals_id_idx", "id"),
             Index("journals_name_idx", "name"),
             Index("journals_version_idx", "version"),
-            Index(
-                "journals_latest_releases",
-                "submitted_date",
-                "name",
-                "version",
-                postgresql_where=(
-                    (cls.version != None) & (cls.action == "new release")  # noqa
-                ),
-            ),
+            Index("journals_submitted_by_idx", "submitted_by"),
         )
 
     id = Column(Integer, primary_key=True, nullable=False)
@@ -598,7 +562,7 @@ class BlacklistedProject(db.Model):
     )
     name = Column(Text, unique=True, nullable=False)
     _blacklisted_by = Column(
-        "blacklisted_by", UUID(as_uuid=True), ForeignKey("accounts_user.id")
+        "blacklisted_by", UUID(as_uuid=True), ForeignKey("accounts_user.id"), index=True
     )
     blacklisted_by = orm.relationship(User)
     comment = Column(Text, nullable=False, server_default="")
